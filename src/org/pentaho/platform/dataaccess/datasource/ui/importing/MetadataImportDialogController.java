@@ -23,10 +23,13 @@ import java.beans.PropertyChangeListener;
 import com.google.gwt.user.client.ui.FileUpload;
 import com.google.gwt.user.client.ui.FlowPanel;
 import com.google.gwt.user.client.ui.FormPanel;
+import com.google.gwt.user.client.ui.FormPanel.SubmitCompleteHandler;
 import com.google.gwt.user.client.ui.Hidden;
 import com.google.gwt.user.client.ui.RootPanel;
 import com.google.gwt.user.client.ui.TextBox;
 import com.google.gwt.user.client.ui.VerticalPanel;
+import com.google.gwt.user.client.ui.FormPanel.SubmitCompleteEvent;
+
 import org.pentaho.gwt.widgets.client.utils.NameUtils;
 import org.pentaho.gwt.widgets.client.utils.i18n.ResourceBundle;
 import org.pentaho.platform.dataaccess.datasource.wizard.DatasourceMessages;
@@ -127,6 +130,8 @@ public class MetadataImportDialogController extends AbstractXulDialogController<
       metadataFileUpload = new FileUpload();
       metadataFileUpload.setName( "uploadFormElement" );
       metadataFileUpload.getElement().setId( "metaFileUpload" );
+      metadataFileUpload.getElement().appendChild( ( new Hidden( "mark_temporary", Boolean.TRUE.toString() ).getElement() ));
+      mainFormPanel.add( metadataFileUpload );
       metadataFileUpload.addChangeHandler( new ChangeHandler() {
         @Override
         public void onChange( ChangeEvent event ) {
@@ -143,7 +148,17 @@ public class MetadataImportDialogController extends AbstractXulDialogController<
           }
         }
       } );
+      
       mainFormPanel.add( metadataFileUpload );
+      formPanel.addSubmitCompleteHandler( new SubmitCompleteHandler() {
+        
+        @Override
+        public void onSubmitComplete( SubmitCompleteEvent event ) {
+          Window.alert( event.getResults() );
+          
+        }
+      } );
+      
       VerticalPanel vp = (VerticalPanel) hiddenArea.getManagedObject();
       vp.add( formPanel );
     }

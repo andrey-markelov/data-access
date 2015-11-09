@@ -446,31 +446,31 @@ public class MetadataResource {
     return deleteMetadata( domainId );
   }
   
-  /**
-   * Checks if this xmi file contains mondrian model
-   * @param metadataFile
-   * @return
-   */
-  @GET
-  @Path( "/isContainsModel" )
-  @Produces( "text/plain" )
-  @StatusCodes( {
-      @ResponseCode( code = 200, condition = "Metadata datasource removed." ),
-      @ResponseCode( code = 401, condition = "User is not authorized to delete the Metadata datasource." )
-  } )
-  public Response isContainsModel( @FormDataParam( "metadataFile" ) InputStream metadataFile ) {  
-    boolean res;
+//  /**
+//   * Checks if this xmi file contains mondrian model
+//   * @param metadataFile
+//   * @return
+//   */
+//  @GET
+//  @Path( "/isContainsModel" )
+//  @Produces( "text/plain" )
+//  @StatusCodes( {
+//      @ResponseCode( code = 200, condition = "Metadata datasource removed." ),
+//      @ResponseCode( code = 401, condition = "User is not authorized to delete the Metadata datasource." )
+//  } )
+//  public Response isContainsModel( @FormDataParam( "metadataFile" ) InputStream metadataFile ) {  
+//    boolean res;
+////    
+////    try {
+////      //res = MetadataImportHandler.isContainsModel( metadataFile );
+////    } catch ( PentahoAccessControlException e ) {
+////      return buildUnauthorizedResponse();
+////    } catch ( Exception e ) {
+////      return buildServerErrorResponse();
+////    }
 //    
-//    try {
-//      //res = MetadataImportHandler.isContainsModel( metadataFile );
-//    } catch ( PentahoAccessControlException e ) {
-//      return buildUnauthorizedResponse();
-//    } catch ( Exception e ) {
-//      return buildServerErrorResponse();
-//    }
-    
-    return null;//Response.ok( Boolean.toString( res ) ).build();
-  }
+//    return null;//Response.ok( Boolean.toString( res ) ).build();
+//  }
 
   @PUT
   @Path( "/import" )
