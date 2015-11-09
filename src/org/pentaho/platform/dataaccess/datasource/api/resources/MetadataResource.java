@@ -20,7 +20,10 @@ package org.pentaho.platform.dataaccess.datasource.api.resources;
 import static javax.ws.rs.core.MediaType.APPLICATION_JSON;
 import static javax.ws.rs.core.MediaType.APPLICATION_XML;
 import static javax.ws.rs.core.MediaType.WILDCARD;
-import static javax.ws.rs.core.Response.Status.*;
+import static javax.ws.rs.core.Response.Status.CONFLICT;
+import static javax.ws.rs.core.Response.Status.CREATED;
+import static javax.ws.rs.core.Response.Status.NOT_FOUND;
+import static javax.ws.rs.core.Response.Status.UNAUTHORIZED;
 
 import java.io.FileNotFoundException;
 import java.io.InputStream;
@@ -51,6 +54,7 @@ import org.pentaho.platform.dataaccess.datasource.api.MetadataService;
 import org.pentaho.platform.dataaccess.datasource.wizard.service.messages.Messages;
 import org.pentaho.platform.engine.core.system.PentahoSessionHolder;
 import org.pentaho.platform.engine.core.system.PentahoSystem;
+import org.pentaho.platform.plugin.services.importer.MetadataImportHandler;
 import org.pentaho.platform.plugin.services.importer.PlatformImportException;
 import org.pentaho.platform.plugin.services.metadata.IPentahoMetadataDomainRepositoryExporter;
 import org.pentaho.platform.repository2.unified.webservices.RepositoryFileAclDto;
@@ -440,6 +444,32 @@ public class MetadataResource {
   } )
   public Response doRemoveMetadata( @PathParam( "domainId" ) String domainId ) {
     return deleteMetadata( domainId );
+  }
+  
+  /**
+   * Checks if this xmi file contains mondrian model
+   * @param metadataFile
+   * @return
+   */
+  @GET
+  @Path( "/isContainsModel" )
+  @Produces( "text/plain" )
+  @StatusCodes( {
+      @ResponseCode( code = 200, condition = "Metadata datasource removed." ),
+      @ResponseCode( code = 401, condition = "User is not authorized to delete the Metadata datasource." )
+  } )
+  public Response isContainsModel( @FormDataParam( "metadataFile" ) InputStream metadataFile ) {  
+    boolean res;
+//    
+//    try {
+//      //res = MetadataImportHandler.isContainsModel( metadataFile );
+//    } catch ( PentahoAccessControlException e ) {
+//      return buildUnauthorizedResponse();
+//    } catch ( Exception e ) {
+//      return buildServerErrorResponse();
+//    }
+    
+    return null;//Response.ok( Boolean.toString( res ) ).build();
   }
 
   @PUT

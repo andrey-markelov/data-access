@@ -55,7 +55,10 @@ public class MetadataImportDialogController extends AbstractXulDialogController<
   /**
    *
    */
-  private static final String METADATA_IMPORT_URL = "plugin/data-access/api/metadata/postimport";
+  private static final String METADATA_IMPORT_URL = "plugin/data-access/api/metadata/postimport"; //POST?
+  private static final String METADATA_IMPORT_DSW_URL = "plugin/data-access/api/datasource/dsw/import"; //PUT
+  private static final String METADATA_CHECK_URL = "plugin/data-access/api/metadata/isContainsModel"; //GET
+  private static final String UPLOAD_URL = "UploadService";
   private static Integer FILE_UPLOAD_SUFFIX = 0;
   private BindingFactory bf;
   private XulButton acceptButton;
@@ -108,7 +111,7 @@ public class MetadataImportDialogController extends AbstractXulDialogController<
       formPanel = new FormPanel();
       formPanel.setMethod( FormPanel.METHOD_POST );
       formPanel.setEncoding( FormPanel.ENCODING_MULTIPART );
-      formPanel.setAction( METADATA_IMPORT_URL );
+      formPanel.setAction( UPLOAD_URL );
       formPanel.getElement().getStyle().setProperty( "position", "absolute" );
       formPanel.getElement().getStyle().setProperty( "visibility", "hidden" );
       formPanel.getElement().getStyle().setProperty( "overflow", "hidden" );
@@ -122,7 +125,7 @@ public class MetadataImportDialogController extends AbstractXulDialogController<
       formDomainIdText.setName( "domainId" );
       mainFormPanel.add( formDomainIdText );
       metadataFileUpload = new FileUpload();
-      metadataFileUpload.setName( "metadataFile" );
+      metadataFileUpload.setName( "uploadFormElement" );
       metadataFileUpload.getElement().setId( "metaFileUpload" );
       metadataFileUpload.addChangeHandler( new ChangeHandler() {
         @Override
