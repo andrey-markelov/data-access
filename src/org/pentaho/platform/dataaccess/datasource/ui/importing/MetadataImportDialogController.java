@@ -20,38 +20,49 @@ package org.pentaho.platform.dataaccess.datasource.ui.importing;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 
-import com.google.gwt.user.client.ui.FileUpload;
-import com.google.gwt.user.client.ui.FlowPanel;
-import com.google.gwt.user.client.ui.FormPanel;
-import com.google.gwt.user.client.ui.FormPanel.SubmitCompleteHandler;
-import com.google.gwt.user.client.ui.Hidden;
-import com.google.gwt.user.client.ui.RootPanel;
-import com.google.gwt.user.client.ui.TextBox;
-import com.google.gwt.user.client.ui.VerticalPanel;
-import com.google.gwt.user.client.ui.FormPanel.SubmitCompleteEvent;
-
+import org.codehaus.enunciate.jaxrs.ResponseCode;
 import org.pentaho.gwt.widgets.client.utils.NameUtils;
 import org.pentaho.gwt.widgets.client.utils.i18n.ResourceBundle;
 import org.pentaho.platform.dataaccess.datasource.wizard.DatasourceMessages;
-import org.pentaho.ui.xul.binding.Binding;
-import org.pentaho.ui.xul.binding.BindingFactory;
 import org.pentaho.ui.xul.XulComponent;
 import org.pentaho.ui.xul.XulException;
+import org.pentaho.ui.xul.binding.Binding;
+import org.pentaho.ui.xul.binding.BindingFactory;
 import org.pentaho.ui.xul.components.XulButton;
+import org.pentaho.ui.xul.components.XulConfirmBox;
 import org.pentaho.ui.xul.components.XulLabel;
+import org.pentaho.ui.xul.components.XulMessageBox;
 import org.pentaho.ui.xul.components.XulTextbox;
 import org.pentaho.ui.xul.containers.XulDialog;
-import org.pentaho.ui.xul.components.XulConfirmBox;
 import org.pentaho.ui.xul.containers.XulTree;
 import org.pentaho.ui.xul.containers.XulVbox;
-import org.pentaho.ui.xul.components.XulMessageBox;
 import org.pentaho.ui.xul.stereotype.Bindable;
 import org.pentaho.ui.xul.util.AbstractXulDialogController;
 import org.pentaho.ui.xul.util.XulDialogCallback;
 
+import com.google.gwt.core.client.JavaScriptObject;
 import com.google.gwt.event.dom.client.ChangeEvent;
 import com.google.gwt.event.dom.client.ChangeHandler;
+import com.google.gwt.http.client.Request;
+import com.google.gwt.http.client.RequestBuilder;
+import com.google.gwt.http.client.RequestCallback;
+import com.google.gwt.http.client.RequestException;
+import com.google.gwt.http.client.Response;
+import com.google.gwt.http.client.URL;
+import com.google.gwt.json.client.JSONObject;
+import com.google.gwt.json.client.JSONParser;
+import com.google.gwt.json.client.JSONValue;
 import com.google.gwt.user.client.Window;
+import com.google.gwt.user.client.ui.FileUpload;
+import com.google.gwt.user.client.ui.FlowPanel;
+import com.google.gwt.user.client.ui.FormPanel;
+import com.google.gwt.user.client.ui.FormPanel.SubmitCompleteEvent;
+import com.google.gwt.user.client.ui.FormPanel.SubmitCompleteHandler;
+import com.google.gwt.user.client.ui.HTML;
+import com.google.gwt.user.client.ui.Hidden;
+import com.google.gwt.user.client.ui.RootPanel;
+import com.google.gwt.user.client.ui.TextBox;
+import com.google.gwt.user.client.ui.VerticalPanel;
 
 public class MetadataImportDialogController extends AbstractXulDialogController<MetadataImportDialogModel>
   implements IImportPerspective, IOverwritableController {
@@ -60,8 +71,8 @@ public class MetadataImportDialogController extends AbstractXulDialogController<
    */
   private static final String METADATA_IMPORT_URL = "plugin/data-access/api/metadata/postimport"; //POST?
   private static final String METADATA_IMPORT_DSW_URL = "plugin/data-access/api/datasource/dsw/import"; //PUT
-  private static final String METADATA_CHECK_URL = "plugin/data-access/api/metadata/isContainsModel"; //GET
-  private static final String UPLOAD_URL = "UploadService";
+  private static final String METADATA_CHECK_URL = "plugin/data-access/api/datasource/metadata/iscontainsmodel"; //GET
+  private static final String UPLOAD_URL = "plugin/data-access/api/datasource/metadata/uploadxmi";
   private static Integer FILE_UPLOAD_SUFFIX = 0;
   private BindingFactory bf;
   private XulButton acceptButton;
@@ -128,7 +139,7 @@ public class MetadataImportDialogController extends AbstractXulDialogController<
       formDomainIdText.setName( "domainId" );
       mainFormPanel.add( formDomainIdText );
       metadataFileUpload = new FileUpload();
-      metadataFileUpload.setName( "uploadFormElement" );
+      metadataFileUpload.setName( "metadataFile" );
       metadataFileUpload.getElement().setId( "metaFileUpload" );
       metadataFileUpload.getElement().appendChild( ( new Hidden( "mark_temporary", Boolean.TRUE.toString() ).getElement() ));
       mainFormPanel.add( metadataFileUpload );
@@ -150,17 +161,112 @@ public class MetadataImportDialogController extends AbstractXulDialogController<
       } );
       
       mainFormPanel.add( metadataFileUpload );
+      
       formPanel.addSubmitCompleteHandler( new SubmitCompleteHandler() {
         
         @Override
         public void onSubmitComplete( SubmitCompleteEvent event ) {
-          Window.alert( event.getResults() );
+          
+          Window.alert( "response:" + event.getResults() );
+          final String jsonResponseText = new HTML(event.getResults()).getText();//delete all surrounded tags
+          JSONObject jsonResponse = null;
+          JSONValue jsonVal = JSONParser.parseStrict( jsonResponseText );
+          
+          if( jsonVal!= null ) {
+            jsonResponse = jsonVal.isObject();
+          }
+          if( jsonResponse == null ) {
+            raiseXmiCheckError( "wrong data from xmi file checker" ); 
+            return;
+          }
+          
+          String tempFileName = jsonResponse.get( "xmiFileName" ).toString();
+          RequestBuilder checkFileRequest = new RequestBuilder( RequestBuilder.GET , METADATA_CHECK_URL + "?tempFileName=" + URL.encode( tempFileName ) );
+          
+          checkFileRequest.setCallback( new RequestCallback() {
+            @Override
+            public void onResponseReceived( Request request, Response response ) {
+              if( response.getStatusCode() == 200 ) {
+                
+                if( Boolean.TRUE.toString().equals( response.getText() ) ) {
+                  boolean res = Window.confirm( "This model appears to be a DSW datasource which includes Analysis Model information. Do you want to import this as a DSW datasource instead, which will create the Analysis model?" );
+                  if( res )  {
+                    //importFileAsDSW( tempFileName );
+                  } else {
+                    //importFileAsMetadata( tempFileName );
+                  }
+                } else if ( Boolean.FALSE.toString().equals( response.getText() ) ) {
+                  //importFileAsMetadata( tempFileName );  
+                } else {
+                  raiseXmiCheckError( "wrong data from xmi file checker" );  
+                }
+              } else {
+                raiseXmiCheckError( "[server data error] , wrong code: " + response.getStatusCode() );
+              }
+            }
+            
+            @Override
+            public void onError( Request request, Throwable exception ) {
+              raiseXmiCheckError( "[request error] " + exception.getMessage() );
+            }
+          } );
+          try {
+            checkFileRequest.send();
+          } catch ( RequestException e ) {
+            raiseXmiCheckError( e.getMessage() );
+          }
           
         }
       } );
       
       VerticalPanel vp = (VerticalPanel) hiddenArea.getManagedObject();
       vp.add( formPanel );
+    }
+  }
+  
+  private void raiseXmiCheckError( String message ) {
+    Window.alert( "Error while checking xmi file content: " + message );
+    hideDialog();
+  }
+  
+  private abstract class XmlImporterRequest implements RequestCallback {
+    
+    public abstract void doImport( String fileName );
+    
+    @Override
+    public void onResponseReceived( Request request, Response response ) {
+      if( response.getStatusCode() == 200 ) {
+        
+      } else {
+        raiseXmiCheckError( "[server data error] , wrong code: " + response.getStatusCode() );
+      }
+    }
+    
+    @Override
+    public void onError( Request request, Throwable exception ) {
+      raiseXmiCheckError( "[request error] " + exception.getMessage() );
+    }
+    
+  }
+  
+  private class MetadataImportRequest extends XmlImporterRequest {
+    @Override
+    public void doImport( String fileName ) {
+      RequestBuilder requestBuilder = new RequestBuilder( RequestBuilder.POST , METADATA_IMPORT_URL );
+      //requestBuilder.setRequestData( metadataFileUpload.get );
+      requestBuilder.setCallback( this );
+      try {
+        requestBuilder.send();
+      } catch ( RequestException e ) {
+        raiseXmiCheckError( e.getMessage() );
+      }
+    }
+  }
+  
+  private class DswImportRequest extends XmlImporterRequest {
+    @Override
+    public void doImport( String fileName ) {
+
     }
   }
 

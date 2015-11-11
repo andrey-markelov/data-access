@@ -25,8 +25,13 @@ import static javax.ws.rs.core.Response.Status.CREATED;
 import static javax.ws.rs.core.Response.Status.NOT_FOUND;
 import static javax.ws.rs.core.Response.Status.UNAUTHORIZED;
 
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.io.InputStream;
+import java.io.StringWriter;
 import java.util.List;
 import java.util.Map;
 
@@ -38,6 +43,7 @@ import javax.ws.rs.PUT;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
 import javax.ws.rs.Produces;
+import javax.ws.rs.QueryParam;
 import javax.ws.rs.WebApplicationException;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
@@ -47,6 +53,9 @@ import org.apache.commons.logging.LogFactory;
 import org.codehaus.enunciate.Facet;
 import org.codehaus.enunciate.jaxrs.ResponseCode;
 import org.codehaus.enunciate.jaxrs.StatusCodes;
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
 import org.pentaho.metadata.repository.IMetadataDomainRepository;
 import org.pentaho.platform.api.engine.PentahoAccessControlException;
 import org.pentaho.platform.dataaccess.datasource.api.DatasourceService;
@@ -58,8 +67,10 @@ import org.pentaho.platform.plugin.services.importer.MetadataImportHandler;
 import org.pentaho.platform.plugin.services.importer.PlatformImportException;
 import org.pentaho.platform.plugin.services.metadata.IPentahoMetadataDomainRepositoryExporter;
 import org.pentaho.platform.repository2.unified.webservices.RepositoryFileAclDto;
+import org.pentaho.platform.util.UUIDUtil;
 import org.pentaho.platform.web.http.api.resources.FileResource;
 import org.pentaho.platform.web.http.api.resources.JaxbList;
+import org.pentaho.platform.web.servlet.UploadFileUtils;
 
 import com.sun.jersey.core.header.FormDataContentDisposition;
 import com.sun.jersey.multipart.FormDataBodyPart;
@@ -446,31 +457,99 @@ public class MetadataResource {
     return deleteMetadata( domainId );
   }
   
-//  /**
-//   * Checks if this xmi file contains mondrian model
-//   * @param metadataFile
-//   * @return
-//   */
-//  @GET
-//  @Path( "/isContainsModel" )
-//  @Produces( "text/plain" )
-//  @StatusCodes( {
-//      @ResponseCode( code = 200, condition = "Metadata datasource removed." ),
-//      @ResponseCode( code = 401, condition = "User is not authorized to delete the Metadata datasource." )
-//  } )
-//  public Response isContainsModel( @FormDataParam( "metadataFile" ) InputStream metadataFile ) {  
-//    boolean res;
-////    
-////    try {
-////      //res = MetadataImportHandler.isContainsModel( metadataFile );
-////    } catch ( PentahoAccessControlException e ) {
-////      return buildUnauthorizedResponse();
-////    } catch ( Exception e ) {
-////      return buildServerErrorResponse();
-////    }
-//    
-//    return null;//Response.ok( Boolean.toString( res ) ).build();
-//  }
+  /**
+   * Checks xmi file from tmp directory for containing mondrian model
+   * @param metadataFile
+   * @return "TRUE", "FALSE"
+   */
+  @GET
+  @Path( "/iscontainsmodel" )
+  @Produces( "text/plain" )
+  @StatusCodes( {
+      @ResponseCode( code = 200, condition = "Metadata datasource removed." ),
+      @ResponseCode( code = 401, condition = "User is not authorized to delete the Metadata datasource." )
+  } )
+  public Response isContainsModel( @QueryParam ( "tempFileName" ) String tempFileName ) {  
+    boolean res;
+    String path = PentahoSystem.getApplicationContext().getSolutionPath( "system/tmp" );
+    try {
+      res = MetadataImportHandler.isContainsModel( new FileInputStream( path + File.separatorChar + tempFileName ) );
+    } catch ( Exception e ) {
+      return buildServerErrorResponse();
+    }
+    
+    return Response.ok( Boolean.toString( res ) ).build();
+  }
+  
+  /**
+   * Uploads metadata file and localization bundle files to "tmp" dir
+   * @param metadataFile
+   * @param metadataFileInfo
+   * @param localeFiles
+   * @param localeFilesInfo
+   * @return uploaded file names in json structure like this:<br/>
+   *<ul><li>if there are locale files (localeFiles != null):
+   *<br/><code>{"xmiFileName":"filename.tmp",
+   *<br/>"bundles":["bundle-1-name.tmp", ... , "bundle-N-name.tmp"]}</code></li>
+   *<li>if there are no locale files:
+   *<br/><code>{"xmiFileName":"filename.tmp"}</code></li>
+   *</ul>
+   */
+  @POST
+  @Path( "/uploadxmi" )
+  @Consumes( MediaType.MULTIPART_FORM_DATA )
+  @Produces( APPLICATION_JSON )
+  @StatusCodes( {
+    @ResponseCode( code = 403, condition = "Access Control Forbidden" ),
+    @ResponseCode( code = 201, condition = "Indicates successful upload" )
+  } )
+  public Response uploadMetadataFilesToTempDir( 
+      @FormDataParam( "metadataFile" ) InputStream metadataFile,
+      @FormDataParam( "localeFiles" ) List<FormDataBodyPart> localeFiles ) {
+        
+        JSONObject json = new JSONObject();
+        StringWriter fileNameWriter = new StringWriter(); 
+        UploadFileUtils utils = new UploadFileUtils( PentahoSessionHolder.getSession() );
+        
+        utils.setShouldUnzip( false );
+        utils.setTemporary( true );
+        utils.setFileName( UUIDUtil.getUUID().toString() );
+        utils.setWriter( fileNameWriter );
+        try {
+          utils.process( metadataFile );
+        } catch ( Exception e ) {
+          return buildServerErrorResponse();
+        }
+        try {
+          json.put( "xmiFileName", fileNameWriter.toString() );
+        } catch ( JSONException e ) {
+          return buildServerErrorResponse();
+        }
+        
+
+        if( localeFiles != null && localeFiles.size() != 0 ) {
+          JSONArray jsonBundleFiles = new JSONArray();
+          for(FormDataBodyPart localeFile : localeFiles ) {
+            InputStream inputStream = new ByteArrayInputStream( localeFile.getValueAs( byte[].class ) );
+            fileNameWriter = new StringWriter(); 
+            utils.setFileName( UUIDUtil.getUUID().toString() );
+            utils.setWriter( fileNameWriter );
+            try {
+              utils.process( inputStream );
+            } catch ( Exception e ) {
+              return buildServerErrorResponse();
+            }
+            jsonBundleFiles.put( fileNameWriter );
+          }
+          try {
+            json.put( "bundles", jsonBundleFiles );
+          } catch ( JSONException e ) {
+            return buildServerErrorResponse();
+          }
+        }
+        
+        return Response.ok( json.toString() ).type( MediaType.APPLICATION_JSON ).build();
+  }
 
   @PUT
   @Path( "/import" )
