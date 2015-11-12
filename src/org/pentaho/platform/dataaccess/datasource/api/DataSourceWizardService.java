@@ -184,13 +184,22 @@ public class DataSourceWizardService extends DatasourceService {
   public String publishDsw( String domainId, InputStream metadataFile, boolean overwrite, boolean checkConnection,
       RepositoryFileAclDto acl )
     throws PentahoAccessControlException, IllegalArgumentException, DswPublishValidationException, Exception {
+    return publishDsw( domainId, metadataFile, null, null, overwrite, checkConnection, acl, true );
+  }
+  
+  public String publishDsw( String domainId, InputStream metadataFile, List<InputStream> localizeFiles, List<String> localizeFileNames, 
+      boolean overwrite, boolean checkConnection, RepositoryFileAclDto acl, boolean enableIdRestrictions )
+    throws PentahoAccessControlException, IllegalArgumentException, DswPublishValidationException, Exception {
     if ( !hasManageAccessCheck() ) {
       throw new PentahoAccessControlException();
     }
-    if ( !endsWith( domainId, METADATA_EXT ) ) {
+    if ( enableIdRestrictions && !endsWith( domainId, METADATA_EXT ) ) {
       // if doesn't end in case-sensitive '.xmi' there will be trouble later on
       final String errorMsg = "domainId must end in " + METADATA_EXT;
       throw new IllegalArgumentException( errorMsg );
+    }
+    if ( localizeFiles == null ? ( localizeFileNames != null ) : ( localizeFiles.size() != localizeFileNames.size() ) ) {
+      throw new IllegalArgumentException( "localizeFiles and localizeFileNames must have equal size" );
     }
     if ( metadataFile == null ) {
       throw new IllegalArgumentException( "metadataFile is null" );
@@ -222,6 +231,16 @@ public class DataSourceWizardService extends DatasourceService {
     InputStream metadataIn = toInputStreamWrapper( domain, xmiParser );
     IPlatformImportBundle metadataBundle = createMetadataDswBundle( domain, metadataIn, overwrite, acl );
     IPlatformImportBundle mondrianBundle = createMondrianDswBundle( domain, acl );
+    
+    //add localization bundles
+    if ( localizeFiles != null ) {
+      for ( int i = 0; i < localizeFiles.size(); i++ ) {
+        IPlatformImportBundle localizationBundle =  MetadataService.createNewRepositoryFileImportBundle( localizeFiles.get( i ), localizeFileNames.get( i ), domainId );
+        metadataBundle.getChildBundles().add( localizationBundle );
+        logger.info( "created language file" );
+      }
+    }
+    
     // do import
     IPlatformImporter importer = getIPlatformImporter();
     importer.importFile( metadataBundle );

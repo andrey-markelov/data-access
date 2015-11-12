@@ -84,9 +84,31 @@ public class MetadataService extends DatasourceService {
                                         FormDataContentDisposition metadataFileInfo, boolean overwrite,
                                         List<FormDataBodyPart> localeFiles,
                                         List<FormDataContentDisposition> localeFilesInfo, RepositoryFileAclDto acl )
-    throws PentahoAccessControlException, PlatformImportException,
-    Exception {
+    throws PentahoAccessControlException, PlatformImportException, Exception {
 
+    List<InputStream> localeFileStreams = null;
+    List<String> localeFileNames = null;
+
+    if ( localeFiles != null ) {
+      localeFileStreams = new ArrayList<InputStream>();
+      localeFileNames = new ArrayList<String>();
+      
+      for ( int i = 0; i < localeFiles.size(); i++ ) {
+        logger.info( "create language file" );
+        InputStream inputStream = createNewByteArrayInputStream( localeFiles.get( i ).getValueAs( byte[].class ) );
+        localeFileStreams.add( inputStream );
+        localeFileNames.add( localeFilesInfo.get( i ).getFileName() );
+      }
+    }
+
+    importMetadataDatasource( domainId, metadataFile, overwrite, localeFileStreams, localeFileNames, acl );
+   
+  }
+  
+  public void importMetadataDatasource( String domainId, InputStream metadataFile, boolean overwrite,
+      List<InputStream> localeFileStreams, List<String> localeFileNames, RepositoryFileAclDto acl ) 
+          throws PentahoAccessControlException, PlatformImportException, Exception {
+    
     accessValidation();
 
     FileResource fr = createNewFileResource();
@@ -100,12 +122,10 @@ public class MetadataService extends DatasourceService {
 
     RepositoryFileImportBundle.Builder bundleBuilder = createNewRepositoryFileImportBundleBuilder( metadataFile, overwrite, domainId, acl );
 
-
-    if ( localeFiles != null ) {
-      for ( int i = 0; i < localeFiles.size(); i++ ) {
+    if ( localeFileStreams != null ) {
+      for ( int i = 0; i < localeFileStreams.size(); i++ ) {
         logger.info( "create language file" );
-        ByteArrayInputStream bais = createNewByteArrayInputStream( localeFiles.get( i ).getValueAs( byte[].class ) );
-        IPlatformImportBundle localizationBundle =  createNewRepositoryFileImportBundle( bais, localeFilesInfo.get( i ).getFileName(), domainId );
+        IPlatformImportBundle localizationBundle =  createNewRepositoryFileImportBundle( localeFileStreams.get( i ), localeFileNames.get( i ), domainId );
         bundleBuilder.addChildBundle( localizationBundle );
       }
     }
@@ -205,7 +225,7 @@ public class MetadataService extends DatasourceService {
     return builder;
   }
 
-  protected RepositoryFileImportBundle createNewRepositoryFileImportBundle( ByteArrayInputStream bais, String fileName, String domainId ) {
+  public static RepositoryFileImportBundle createNewRepositoryFileImportBundle( InputStream bais, String fileName, String domainId ) {
     return new RepositoryFileImportBundle.Builder().input( bais ).charSet( "UTF-8" ).hidden( false )
       .name( fileName ).withParam( "domain-id", domainId )
       .build();

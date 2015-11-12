@@ -29,14 +29,16 @@ import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
-import java.io.IOException;
 import java.io.InputStream;
 import java.io.StringWriter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 import javax.ws.rs.Consumes;
 import javax.ws.rs.DELETE;
+import javax.ws.rs.DefaultValue;
+import javax.ws.rs.FormParam;
 import javax.ws.rs.GET;
 import javax.ws.rs.POST;
 import javax.ws.rs.PUT;
@@ -48,6 +50,7 @@ import javax.ws.rs.WebApplicationException;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 
+import org.apache.commons.io.IOUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.codehaus.enunciate.Facet;
@@ -56,14 +59,16 @@ import org.codehaus.enunciate.jaxrs.StatusCodes;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.json.simple.parser.JSONParser;
+import org.pentaho.metadata.model.Domain;
 import org.pentaho.metadata.repository.IMetadataDomainRepository;
+import org.pentaho.metadata.util.XmiParser;
 import org.pentaho.platform.api.engine.PentahoAccessControlException;
 import org.pentaho.platform.dataaccess.datasource.api.DatasourceService;
 import org.pentaho.platform.dataaccess.datasource.api.MetadataService;
 import org.pentaho.platform.dataaccess.datasource.wizard.service.messages.Messages;
 import org.pentaho.platform.engine.core.system.PentahoSessionHolder;
 import org.pentaho.platform.engine.core.system.PentahoSystem;
-import org.pentaho.platform.plugin.services.importer.MetadataImportHandler;
 import org.pentaho.platform.plugin.services.importer.PlatformImportException;
 import org.pentaho.platform.plugin.services.metadata.IPentahoMetadataDomainRepositoryExporter;
 import org.pentaho.platform.repository2.unified.webservices.RepositoryFileAclDto;
@@ -83,6 +88,7 @@ import com.sun.jersey.multipart.FormDataParam;
 public class MetadataResource {
 
   private static final Log logger = LogFactory.getLog( MetadataResource.class );
+  private static final String TEMP_FILE_DIR = PentahoSystem.getApplicationContext().getSolutionPath( "system/tmp" );
   protected static final String OVERWRITE_IN_REPOS = "overwrite";
   private static final String SUCCESS = "3";
   private static final String DATASOURCE_ACL = "acl";
@@ -285,7 +291,7 @@ public class MetadataResource {
   public Response importMetadata( @PathParam( "domainId" ) String domainId,
       @FormDataParam( "metadataFile" ) InputStream metadataFile,
       @FormDataParam( "metadataFile" ) FormDataContentDisposition metadataFileInfo,
-      @FormDataParam( OVERWRITE_IN_REPOS ) Boolean overwrite,
+      @FormDataParam( OVERWRITE_IN_REPOS ) @DefaultValue( "false" ) Boolean overwrite,
       @FormDataParam( "localeFiles" ) List<FormDataBodyPart> localeFiles,
       @FormDataParam( "localeFiles" ) List<FormDataContentDisposition> localeFilesInfo,
       @FormDataParam( DATASOURCE_ACL ) RepositoryFileAclDto acl ) {
@@ -458,36 +464,10 @@ public class MetadataResource {
   }
   
   /**
-   * Checks xmi file from tmp directory for containing mondrian model
-   * @param metadataFile
-   * @return "TRUE", "FALSE"
-   */
-  @GET
-  @Path( "/iscontainsmodel" )
-  @Produces( "text/plain" )
-  @StatusCodes( {
-      @ResponseCode( code = 200, condition = "Metadata datasource removed." ),
-      @ResponseCode( code = 401, condition = "User is not authorized to delete the Metadata datasource." )
-  } )
-  public Response isContainsModel( @QueryParam ( "tempFileName" ) String tempFileName ) {  
-    boolean res;
-    String path = PentahoSystem.getApplicationContext().getSolutionPath( "system/tmp" );
-    try {
-      res = MetadataImportHandler.isContainsModel( new FileInputStream( path + File.separatorChar + tempFileName ) );
-    } catch ( Exception e ) {
-      return buildServerErrorResponse();
-    }
-    
-    return Response.ok( Boolean.toString( res ) ).build();
-  }
-  
-  /**
    * Uploads metadata file and localization bundle files to "tmp" dir
    * @param metadataFile
-   * @param metadataFileInfo
    * @param localeFiles
-   * @param localeFilesInfo
-   * @return uploaded file names in json structure like this:<br/>
+   * @return String: uploaded file names in json structure like this:<br/>
    *<ul><li>if there are locale files (localeFiles != null):
    *<br/><code>{"xmiFileName":"filename.tmp",
    *<br/>"bundles":["bundle-1-name.tmp", ... , "bundle-N-name.tmp"]}</code></li>
@@ -501,7 +481,7 @@ public class MetadataResource {
   @Produces( APPLICATION_JSON )
   @StatusCodes( {
     @ResponseCode( code = 403, condition = "Access Control Forbidden" ),
-    @ResponseCode( code = 201, condition = "Indicates successful upload" )
+    @ResponseCode( code = 200, condition = "Indicates successful upload" )
   } )
   public Response uploadMetadataFilesToTempDir( 
       @FormDataParam( "metadataFile" ) InputStream metadataFile,
@@ -525,6 +505,7 @@ public class MetadataResource {
         } catch ( JSONException e ) {
           return buildServerErrorResponse();
         }
+        logger.info( "metadata file uploaded: " + fileNameWriter.toString() );
         
 
         if( localeFiles != null && localeFiles.size() != 0 ) {
@@ -537,18 +518,136 @@ public class MetadataResource {
             try {
               utils.process( inputStream );
             } catch ( Exception e ) {
+              logger.error( "Uploading error: " + e );
               return buildServerErrorResponse();
             }
-            jsonBundleFiles.put( fileNameWriter );
+            
+            JSONObject jsonBundleObject = new JSONObject();
+            try {
+              jsonBundleObject.put( "originalFileName", localeFile.getFormDataContentDisposition().getFileName() );
+              jsonBundleObject.put( "tempFileName", fileNameWriter.toString() );
+            } catch ( JSONException e ) {
+              return buildServerErrorResponse();
+            }
+            
+            jsonBundleFiles.put( jsonBundleObject );
           }
           try {
             json.put( "bundles", jsonBundleFiles );
           } catch ( JSONException e ) {
             return buildServerErrorResponse();
           }
+          logger.info( "locale file uploaded: " + fileNameWriter.toString() );
         }
         
         return Response.ok( json.toString() ).type( MediaType.APPLICATION_JSON ).build();
+  }
+  
+  /**
+   * Checks xmi file from tmp directory for existence of a mondrian model
+   * Could be called after the /uploadxmi
+   * @param tempFileName relative file name without the path
+   * @return String: "true" or "false"
+   */
+  @GET
+  @Path( "/iscontainsmodel" )
+  @Produces( MediaType.TEXT_PLAIN )
+  @StatusCodes( {
+      @ResponseCode( code = 200, condition = "File succesfully checked." ),
+      @ResponseCode( code = 401, condition = "User is not authorized" )
+  } )
+  public Response isContainsModel( @QueryParam ( "tempFileName" ) String tempFileName ) {  
+    boolean res;
+    try {
+      XmiParser xmiParser = new XmiParser();
+      byte[] is = IOUtils.toByteArray( new FileInputStream( TEMP_FILE_DIR + File.separatorChar + tempFileName ) );
+      Domain domain = xmiParser.parseXmi( new java.io.ByteArrayInputStream( is ) );
+      res = !DatasourceService.isMetadataDatasource( domain );
+    } catch ( Exception e ) {
+      logger.error( e );
+      return buildServerErrorResponse();
+    }
+    
+    return Response.ok( Boolean.toString( res ) ).build();
+  }
+  
+  /**
+   * Imports metadata(xmi) file and its related localization bundle files
+   * from temporary directory
+   * Should be called after the /uploadxmi
+   * @param domainId
+   * @param jsonFileList
+   * @param overwrite
+   * @param acl
+   * @return
+   */
+  @POST
+  @Path( "/import/uploaded" )
+  @Consumes( MediaType.APPLICATION_FORM_URLENCODED )
+  @Produces( MediaType.TEXT_PLAIN )
+  @StatusCodes( {
+      @ResponseCode( code = 200, condition = "File succesfully imported." ),
+      @ResponseCode( code = 401, condition = "User is not authorized" )
+  } )
+  public Response importMetadataFromTemp( @FormParam( "domainId" ) String domainId,
+                                        @FormParam ( "jsonFileList" ) String jsonFileList,
+                                        @FormParam( OVERWRITE_IN_REPOS ) boolean overwrite, 
+                                        @FormParam( DATASOURCE_ACL ) RepositoryFileAclDto acl ) {  
+
+    try {  
+      
+      String metadataTempFileName = null;
+      List<String> localeFileNames = new ArrayList<String>();
+      List<InputStream> localeFileStreams = new ArrayList<InputStream>();
+      JSONObject json = new JSONObject( jsonFileList );
+      
+      metadataTempFileName = json.getString( "xmiFileName" );
+      if( metadataTempFileName == null ) {
+        throw new Exception( "Wrong JSON input in parameter tempFileName" );
+      }
+      
+      FileInputStream metaDataFileInputStream = new FileInputStream( TEMP_FILE_DIR + File.separatorChar + metadataTempFileName );
+      
+      JSONArray jsonBundles;
+      try {
+        jsonBundles = json.getJSONArray( "bundles" );
+      } catch( JSONException e ) { 
+        jsonBundles = null;
+      }
+
+      if( jsonBundles != null ) {
+        for( int i = 0; i < jsonBundles.length(); i++ ) {
+          JSONObject jsonBundle = jsonBundles.getJSONObject( i );
+          String originalFileName = jsonBundle.getString( "originalFileName" );
+          String tempFileName = jsonBundle.getString( "tempFileName" );
+          
+          localeFileNames.add( originalFileName );
+          localeFileStreams.add( new FileInputStream( TEMP_FILE_DIR + File.separatorChar + tempFileName ) );
+        }
+      }
+      
+      service.importMetadataDatasource( domainId, metaDataFileInputStream, overwrite, localeFileStreams, localeFileNames, acl );
+      return Response.ok( "UDLOADED" ).build();
+    } catch ( PentahoAccessControlException e ) {
+      return buildServerErrorResponse( e );
+    } catch ( PlatformImportException e ) {
+      if ( e.getErrorStatus() == PlatformImportException.PUBLISH_PROHIBITED_SYMBOLS_ERROR ) {
+        FileResource fr = createFileResource();
+        return buildServerError003Response( domainId, fr );
+      } else {
+        String msg = e.getMessage();
+        logger.error( "Error import metadata: " + msg + " status = " + e.getErrorStatus() );
+        Throwable throwable = e.getCause();
+        if ( throwable != null ) {
+          msg = throwable.getMessage();
+          logger.error( "Root cause: " + msg );
+        }
+        return buildOkResponse( String.valueOf( e.getErrorStatus() ) );
+      }
+    } catch ( Exception e ) {
+      logger.error( e );
+      return buildServerError001Response();
+    }
   }
 
   @PUT

@@ -22,14 +22,18 @@ import static javax.ws.rs.core.MediaType.APPLICATION_XML;
 import static javax.ws.rs.core.MediaType.WILDCARD;
 import static javax.ws.rs.core.Response.Status.*;
 
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.InputStream;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 import javax.ws.rs.Consumes;
 import javax.ws.rs.DELETE;
 import javax.ws.rs.DefaultValue;
+import javax.ws.rs.FormParam;
 import javax.ws.rs.GET;
 import javax.ws.rs.POST;
 import javax.ws.rs.PUT;
@@ -43,9 +47,15 @@ import javax.ws.rs.core.Response;
 import org.codehaus.enunciate.Facet;
 import org.codehaus.enunciate.jaxrs.ResponseCode;
 import org.codehaus.enunciate.jaxrs.StatusCodes;
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
 import org.pentaho.platform.api.engine.PentahoAccessControlException;
 import org.pentaho.platform.dataaccess.datasource.api.DataSourceWizardService;
+import org.pentaho.platform.engine.core.system.PentahoSystem;
+import org.pentaho.platform.plugin.services.importer.PlatformImportException;
 import org.pentaho.platform.repository2.unified.webservices.RepositoryFileAclDto;
+import org.pentaho.platform.web.http.api.resources.FileResource;
 import org.pentaho.platform.web.http.api.resources.JaxbList;
 
 import com.sun.jersey.multipart.FormDataParam;
@@ -56,6 +66,7 @@ import com.sun.jersey.multipart.FormDataParam;
 @Path( "/data-access/api/datasource/dsw" )
 public class DataSourceWizardResource {
   private static final String DATASOURCE_ACL = "acl";
+  private static final String TEMP_FILE_DIR = PentahoSystem.getApplicationContext().getSolutionPath( "system/tmp" );
 
   protected DataSourceWizardService service;
   protected ResourceUtil resourceUtil;
@@ -232,6 +243,75 @@ public class DataSourceWizardResource {
       @FormDataParam( DATASOURCE_ACL ) RepositoryFileAclDto acl) {
     try {
       final String dswId = service.publishDsw( domainId, metadataFile, overwrite, checkConnection, acl );
+      return buildOkResponse( dswId );
+    } catch ( PentahoAccessControlException e ) {
+      return buildUnauthorizedResponse();
+    } catch ( IllegalArgumentException e ) {
+      return buildBadRequestResponse( e.getMessage() );
+    } catch ( DataSourceWizardService.DswPublishValidationException e ) {
+      return buildConfilictResponse( e.getMessage() );
+    } catch ( Exception e ) {
+      return buildServerErrorResponse();
+    }
+  }
+  
+  /**
+   * Imports metadata(xmi) file and its related localization bundle files
+   * from temporary directory
+   * Should be called after the /datasource/metadata/uploadxmi
+   * @param domainId
+   * @param jsonFileList
+   * @param overwrite
+   * @param checkConnection
+   * @param acl
+   * @return
+   */
+  @POST
+  @Path( "/import/uploaded" )
+  @Consumes( MediaType.APPLICATION_FORM_URLENCODED )
+  @Produces( MediaType.TEXT_PLAIN )
+  @StatusCodes( {
+      @ResponseCode( code = 200, condition = "File succesfully imported." ),
+      @ResponseCode( code = 401, condition = "User is not authorized" )
+  } )
+  public Response publishDswFromTemp( @FormParam( "domainId" ) String domainId,
+                                        @FormParam ( "jsonFileList" ) String jsonFileList,
+                                        @FormParam( "overwrite" ) @DefaultValue( "false" ) boolean overwrite,
+                                        @FormParam( "checkConnection" ) @DefaultValue( "false" ) boolean checkConnection,
+                                        @FormParam( DATASOURCE_ACL ) RepositoryFileAclDto acl ) {  
+    try {  
+      
+      String metadataTempFileName = null;
+      List<String> localeFileNames = new ArrayList<String>();
+      List<InputStream> localeFileStreams = new ArrayList<InputStream>();
+      JSONObject json = new JSONObject( jsonFileList );
+      
+      metadataTempFileName = json.getString( "xmiFileName" );
+      if( metadataTempFileName == null ) {
+        throw new Exception( "Wrong JSON input in parameter tempFileName" );
+      }
+      
+      FileInputStream metaDataFileInputStream = new FileInputStream( TEMP_FILE_DIR + File.separatorChar + metadataTempFileName );
+      
+      JSONArray jsonBundles;
+      try {
+        jsonBundles = json.getJSONArray( "bundles" );
+      } catch( JSONException e ) { 
+        jsonBundles = null;
+      }
+
+      if( jsonBundles != null ) {
+        for( int i = 0; i < jsonBundles.length(); i++ ) {
+          JSONObject jsonBundle = jsonBundles.getJSONObject( i );
+          String originalFileName = jsonBundle.getString( "originalFileName" );
+          String tempFileName = jsonBundle.getString( "tempFileName" );
+          
+          localeFileNames.add( originalFileName );
+          localeFileStreams.add( new FileInputStream( TEMP_FILE_DIR + File.separatorChar + tempFileName ) );
+        }
+      }
+      
+      final String dswId = service.publishDsw( domainId + ".xmi", metaDataFileInputStream, localeFileStreams, localeFileNames, overwrite, checkConnection, acl, false );
       return buildOkResponse( dswId );
     } catch ( PentahoAccessControlException e ) {
       return buildUnauthorizedResponse();

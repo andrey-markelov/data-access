@@ -69,10 +69,10 @@ public class MetadataImportDialogController extends AbstractXulDialogController<
   /**
    *
    */
-  private static final String METADATA_IMPORT_URL = "plugin/data-access/api/metadata/postimport"; //POST?
-  private static final String METADATA_IMPORT_DSW_URL = "plugin/data-access/api/datasource/dsw/import"; //PUT
+  private static final String UPLOAD_URL = "plugin/data-access/api/datasource/metadata/uploadxmi";//POST
+  private static final String METADATA_IMPORT_XMI_URL = "plugin/data-access/api/datasource/metadata/import/uploaded"; //POST
+  private static final String METADATA_IMPORT_DSW_URL = "plugin/data-access/api/datasource/dsw/import/uploaded"; //POST
   private static final String METADATA_CHECK_URL = "plugin/data-access/api/datasource/metadata/iscontainsmodel"; //GET
-  private static final String UPLOAD_URL = "plugin/data-access/api/datasource/metadata/uploadxmi";
   private static Integer FILE_UPLOAD_SUFFIX = 0;
   private BindingFactory bf;
   private XulButton acceptButton;
@@ -167,39 +167,41 @@ public class MetadataImportDialogController extends AbstractXulDialogController<
         @Override
         public void onSubmitComplete( SubmitCompleteEvent event ) {
           
-          Window.alert( "response:" + event.getResults() );
           final String jsonResponseText = new HTML(event.getResults()).getText();//delete all surrounded tags
-          JSONObject jsonResponse = null;
+          final JSONObject jsonResponse;
           JSONValue jsonVal = JSONParser.parseStrict( jsonResponseText );
           
           if( jsonVal!= null ) {
             jsonResponse = jsonVal.isObject();
+          } else {
+            jsonResponse = null;
           }
           if( jsonResponse == null ) {
             raiseXmiCheckError( "wrong data from xmi file checker" ); 
             return;
           }
           
-          String tempFileName = jsonResponse.get( "xmiFileName" ).toString();
-          RequestBuilder checkFileRequest = new RequestBuilder( RequestBuilder.GET , METADATA_CHECK_URL + "?tempFileName=" + URL.encode( tempFileName ) );
-          
+          String tempFileName = jsonResponse.get( "xmiFileName" ).isString().stringValue();
+          RequestBuilder checkFileRequest = new RequestBuilder( RequestBuilder.GET , 
+              METADATA_CHECK_URL + "?tempFileName=" + URL.encode( tempFileName ) );
+
           checkFileRequest.setCallback( new RequestCallback() {
             @Override
             public void onResponseReceived( Request request, Response response ) {
               if( response.getStatusCode() == 200 ) {
                 
-                if( Boolean.TRUE.toString().equals( response.getText() ) ) {
-                  boolean res = Window.confirm( "This model appears to be a DSW datasource which includes Analysis Model information. Do you want to import this as a DSW datasource instead, which will create the Analysis model?" );
-                  if( res )  {
-                    //importFileAsDSW( tempFileName );
-                  } else {
-                    //importFileAsMetadata( tempFileName );
-                  }
+                boolean isLoadAsDsw = false;
+                
+                if( Boolean.TRUE.toString().equalsIgnoreCase( response.getText() ) ) {
+                  isLoadAsDsw = Window.confirm( resBundle.getString( "importDialog.CONFIRMATION_LOAD_DSW" ) );
                 } else if ( Boolean.FALSE.toString().equals( response.getText() ) ) {
-                  //importFileAsMetadata( tempFileName );  
+                  isLoadAsDsw = false;  
                 } else {
                   raiseXmiCheckError( "wrong data from xmi file checker" );  
                 }
+                
+                 new XmiImporterRequest().doImport( isLoadAsDsw?METADATA_IMPORT_DSW_URL:METADATA_IMPORT_XMI_URL, jsonResponse );
+                
               } else {
                 raiseXmiCheckError( "[server data error] , wrong code: " + response.getStatusCode() );
               }
@@ -225,18 +227,32 @@ public class MetadataImportDialogController extends AbstractXulDialogController<
   }
   
   private void raiseXmiCheckError( String message ) {
-    Window.alert( "Error while checking xmi file content: " + message );
+    Window.alert( resBundle.getString( "importDialog.ERROR_IMPORTING_METADATA" ) + ": " + message );
     hideDialog();
   }
   
-  private abstract class XmlImporterRequest implements RequestCallback {
+  private class XmiImporterRequest implements RequestCallback {
     
-    public abstract void doImport( String fileName );
+    public void doImport( String url, JSONObject jsonResponse ) {
+      RequestBuilder requestBuilder = new RequestBuilder( RequestBuilder.POST , url );
+      requestBuilder.setRequestData( "domainId=" + URL.encode( importDialogModel.getDomainId() ) +
+          "&jsonFileList=" + URL.encode( jsonResponse.toString() ) +
+          "&overwrite=true");
+      
+      requestBuilder.setHeader( "Content-Type", "application/x-www-form-urlencoded" );
+      
+      requestBuilder.setCallback( this );
+      try {
+        requestBuilder.send();
+      } catch ( RequestException e ) {
+        raiseXmiCheckError( e.getMessage() );
+      }
+    }
     
     @Override
     public void onResponseReceived( Request request, Response response ) {
       if( response.getStatusCode() == 200 ) {
-        
+        Window.alert( resBundle.getString( "importDialog.SUCCESS_METADATA_IMPORT" ) );
       } else {
         raiseXmiCheckError( "[server data error] , wrong code: " + response.getStatusCode() );
       }
@@ -249,26 +265,6 @@ public class MetadataImportDialogController extends AbstractXulDialogController<
     
   }
   
-  private class MetadataImportRequest extends XmlImporterRequest {
-    @Override
-    public void doImport( String fileName ) {
-      RequestBuilder requestBuilder = new RequestBuilder( RequestBuilder.POST , METADATA_IMPORT_URL );
-      //requestBuilder.setRequestData( metadataFileUpload.get );
-      requestBuilder.setCallback( this );
-      try {
-        requestBuilder.send();
-      } catch ( RequestException e ) {
-        raiseXmiCheckError( e.getMessage() );
-      }
-    }
-  }
-  
-  private class DswImportRequest extends XmlImporterRequest {
-    @Override
-    public void doImport( String fileName ) {
-
-    }
-  }
 
   public XulDialog getDialog() {
     return importDialog;
