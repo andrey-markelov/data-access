@@ -18,18 +18,31 @@
 package org.pentaho.platform.dataaccess.datasource.api;
 
 import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.io.InputStream;
+import java.io.StringWriter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import javax.ws.rs.FormParam;
+import javax.ws.rs.QueryParam;
+import javax.ws.rs.core.Response;
+
+import org.apache.commons.io.IOUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import org.pentaho.metadata.model.Domain;
+import org.pentaho.metadata.util.XmiParser;
 import org.pentaho.platform.api.engine.IPentahoSession;
 import org.pentaho.platform.api.engine.PentahoAccessControlException;
 import org.pentaho.platform.api.repository2.unified.IPlatformImportBundle;
 import org.pentaho.platform.api.repository2.unified.RepositoryFileAcl;
+import org.pentaho.platform.dataaccess.datasource.api.resources.MetadataTempFilesListBundleDto;
+import org.pentaho.platform.dataaccess.datasource.api.resources.MetadataTempFilesListDto;
 import org.pentaho.platform.dataaccess.datasource.wizard.service.messages.Messages;
 import org.pentaho.platform.engine.core.system.PentahoSessionHolder;
 import org.pentaho.platform.engine.core.system.PentahoSystem;
@@ -39,16 +52,20 @@ import org.pentaho.platform.plugin.services.importer.RepositoryFileImportBundle;
 import org.pentaho.platform.plugin.services.metadata.IAclAwarePentahoMetadataDomainRepositoryImporter;
 import org.pentaho.platform.plugin.services.metadata.IPentahoMetadataDomainRepositoryExporter;
 import org.pentaho.platform.repository2.unified.webservices.RepositoryFileAclDto;
+import org.pentaho.platform.util.UUIDUtil;
 import org.pentaho.platform.web.http.api.resources.FileResource;
+import org.pentaho.platform.web.servlet.UploadFileUtils;
 import org.pentaho.platform.dataaccess.datasource.wizard.service.ConnectionServiceException;
 
 import com.sun.jersey.core.header.FormDataContentDisposition;
 import com.sun.jersey.multipart.FormDataBodyPart;
+import com.sun.jersey.multipart.FormDataParam;
 
 public class MetadataService extends DatasourceService {
   protected IAclAwarePentahoMetadataDomainRepositoryImporter aclAwarePentahoMetadataDomainRepositoryImporter;
 
   private static final Log logger = LogFactory.getLog( MetadataService.class );
+  public static final String TEMP_FILE_DIR = PentahoSystem.getApplicationContext().getSolutionPath( "system/tmp" );
 
   public MetadataService() {
     if ( metadataDomainRepository instanceof IAclAwarePentahoMetadataDomainRepositoryImporter ) {
@@ -78,6 +95,44 @@ public class MetadataService extends DatasourceService {
       e.printStackTrace();
     }
     return metadataIds;
+  }
+  
+  public MetadataTempFilesListDto uploadMetadataFilesToTempDir( InputStream metadataFile, 
+      List<FormDataBodyPart> localeFiles ) throws Exception {
+        
+    StringWriter fileNameWriter = new StringWriter(); 
+    UploadFileUtils utils = new UploadFileUtils( PentahoSessionHolder.getSession() );
+    
+    utils.setShouldUnzip( false );
+    utils.setTemporary( true );
+    utils.setFileName( UUIDUtil.getUUID().toString() );
+    utils.setWriter( fileNameWriter );
+    utils.process( metadataFile );
+  
+    MetadataTempFilesListDto dto = new MetadataTempFilesListDto();
+    dto.setXmiFileName( fileNameWriter.toString() );
+    logger.info( "metadata file uploaded: " + fileNameWriter.toString() );
+  
+    if( localeFiles != null && localeFiles.size() != 0 ) {
+      List<MetadataTempFilesListBundleDto> bundles = new ArrayList<MetadataTempFilesListBundleDto>();
+      for(FormDataBodyPart localeFile : localeFiles ) {
+        InputStream inputStream = new ByteArrayInputStream( localeFile.getValueAs( byte[].class ) );
+        fileNameWriter = new StringWriter(); 
+        utils.setFileName( UUIDUtil.getUUID().toString() );
+        utils.setWriter( fileNameWriter );
+        utils.process( inputStream );
+  
+        MetadataTempFilesListBundleDto bundle = new MetadataTempFilesListBundleDto( 
+            localeFile.getFormDataContentDisposition().getFileName(), 
+            fileNameWriter.toString() );
+        bundles.add( bundle );
+        
+        logger.info( "locale file uploaded: " + fileNameWriter.toString() );
+      }
+      dto.setBundles( bundles );
+    }
+    
+    return dto;
   }
 
   public void importMetadataDatasource( String domainId, InputStream metadataFile,
@@ -135,6 +190,33 @@ public class MetadataService extends DatasourceService {
     importer.importFile( bundle );
     IPentahoSession pentahoSession = getSession();
     publish( pentahoSession );
+  }
+  
+  public boolean isContainsModel( String tempFileName ) throws Exception {  
+    XmiParser xmiParser = new XmiParser();
+    byte[] is = IOUtils.toByteArray( new FileInputStream( TEMP_FILE_DIR + File.separatorChar + tempFileName ) );
+    Domain domain = xmiParser.parseXmi( new java.io.ByteArrayInputStream( is ) );
+    return !DatasourceService.isMetadataDatasource( domain );
+  }
+  
+  public void importMetadataFromTemp( String domainId, MetadataTempFilesListDto fileList,
+      boolean overwrite, RepositoryFileAclDto acl ) throws PentahoAccessControlException, PlatformImportException, Exception {  
+
+    String metadataTempFileName = fileList.getXmiFileName();
+    FileInputStream metaDataFileInputStream = new FileInputStream( TEMP_FILE_DIR + File.separatorChar + metadataTempFileName );
+    List<MetadataTempFilesListBundleDto> locBundles = fileList.getBundles();
+    List<String> localeFileNames = new ArrayList<String>();
+    List<InputStream> localeFileStreams = new ArrayList<InputStream>();
+    
+    if( locBundles != null ) {
+      for( MetadataTempFilesListBundleDto bundle : locBundles ) {
+        localeFileNames.add( bundle.getOriginalFileName() );
+        localeFileStreams.add( new FileInputStream( TEMP_FILE_DIR + File.separatorChar + bundle.getTempFileName() ) );
+      }
+    }
+    
+    importMetadataDatasource( domainId, metaDataFileInputStream, overwrite, localeFileStreams, localeFileNames, acl );
+    
   }
 
   public RepositoryFileAclDto getMetadataAcl( String domainId )

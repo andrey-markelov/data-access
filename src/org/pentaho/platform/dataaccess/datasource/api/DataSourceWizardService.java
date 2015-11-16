@@ -17,6 +17,8 @@
 
 package org.pentaho.platform.dataaccess.datasource.api;
 
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
@@ -24,6 +26,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+
+import javax.ws.rs.DefaultValue;
+import javax.ws.rs.FormParam;
+import javax.ws.rs.core.Response;
 
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang.StringUtils;
@@ -45,6 +51,8 @@ import org.pentaho.platform.api.repository2.unified.IPlatformImportBundle;
 import org.pentaho.platform.api.repository2.unified.IUnifiedRepository;
 import org.pentaho.platform.api.repository2.unified.RepositoryFileAcl;
 import org.pentaho.platform.dataaccess.datasource.api.DataSourceWizardService.DswPublishValidationException.Type;
+import org.pentaho.platform.dataaccess.datasource.api.resources.MetadataTempFilesListBundleDto;
+import org.pentaho.platform.dataaccess.datasource.api.resources.MetadataTempFilesListDto;
 import org.pentaho.platform.dataaccess.datasource.beans.LogicalModelSummary;
 import org.pentaho.platform.dataaccess.datasource.utils.DataAccessPermissionUtil;
 import org.pentaho.platform.dataaccess.datasource.wizard.service.DatasourceServiceException;
@@ -84,7 +92,7 @@ public class DataSourceWizardService extends DatasourceService {
   private static final String MONDRIAN_SCHEMA_NAME = "schema.xml";
   private static final String MONDRIAN_MIME = "application/vnd.pentaho.mondrian+xml";
   private static final String METADATA_MIME = "text/xmi+xml";
-  private static final String METADATA_EXT = ".xmi";
+  public static final String METADATA_EXT = ".xmi";
   private static final String IMPORT_DOMAIN_ID = "domain-id";
 
   public DataSourceWizardService() {
@@ -184,16 +192,16 @@ public class DataSourceWizardService extends DatasourceService {
   public String publishDsw( String domainId, InputStream metadataFile, boolean overwrite, boolean checkConnection,
       RepositoryFileAclDto acl )
     throws PentahoAccessControlException, IllegalArgumentException, DswPublishValidationException, Exception {
-    return publishDsw( domainId, metadataFile, null, null, overwrite, checkConnection, acl, true );
+    return publishDsw( domainId, metadataFile, null, null, overwrite, checkConnection, acl );
   }
   
   public String publishDsw( String domainId, InputStream metadataFile, List<InputStream> localizeFiles, List<String> localizeFileNames, 
-      boolean overwrite, boolean checkConnection, RepositoryFileAclDto acl, boolean enableIdRestrictions )
+      boolean overwrite, boolean checkConnection, RepositoryFileAclDto acl )
     throws PentahoAccessControlException, IllegalArgumentException, DswPublishValidationException, Exception {
     if ( !hasManageAccessCheck() ) {
       throw new PentahoAccessControlException();
     }
-    if ( enableIdRestrictions && !endsWith( domainId, METADATA_EXT ) ) {
+    if ( !endsWith( domainId, METADATA_EXT ) ) {
       // if doesn't end in case-sensitive '.xmi' there will be trouble later on
       final String errorMsg = "domainId must end in " + METADATA_EXT;
       throw new IllegalArgumentException( errorMsg );
@@ -253,6 +261,29 @@ public class DataSourceWizardService extends DatasourceService {
     PentahoSystem.publish( session, MONDRIAN_PUBLISHER );
     logger.info( "publishDsw: Published DSW with domainId='" + domainId + "'." );
     return domainId;
+  }
+  
+  public String publishDswFromTemp( String domainId,
+      MetadataTempFilesListDto fileList,
+      boolean overwrite,
+      boolean checkConnection,
+      RepositoryFileAclDto acl ) throws PentahoAccessControlException, IllegalArgumentException, DswPublishValidationException, Exception {  
+    
+    String metadataTempFileName = fileList.getXmiFileName();
+    FileInputStream metaDataFileInputStream = new FileInputStream( MetadataService.TEMP_FILE_DIR + File.separatorChar + metadataTempFileName );
+    List<MetadataTempFilesListBundleDto> locBundles = fileList.getBundles();
+    List<String> localeFileNames = new ArrayList<String>();
+    List<InputStream> localeFileStreams = new ArrayList<InputStream>();
+    
+    if( locBundles != null ) {
+    for( MetadataTempFilesListBundleDto bundle : locBundles ) {
+    localeFileNames.add( bundle.getOriginalFileName() );
+    localeFileStreams.add( new FileInputStream( MetadataService.TEMP_FILE_DIR + File.separatorChar + bundle.getTempFileName() ) );
+    }
+    }
+    
+    return publishDsw( domainId + DataSourceWizardService.METADATA_EXT, metaDataFileInputStream, 
+        localeFileStreams, localeFileNames, overwrite, checkConnection, acl );
   }
 
   /**

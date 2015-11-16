@@ -56,10 +56,6 @@ import org.apache.commons.logging.LogFactory;
 import org.codehaus.enunciate.Facet;
 import org.codehaus.enunciate.jaxrs.ResponseCode;
 import org.codehaus.enunciate.jaxrs.StatusCodes;
-import org.json.JSONArray;
-import org.json.JSONException;
-import org.json.JSONObject;
-import org.json.simple.parser.JSONParser;
 import org.pentaho.metadata.model.Domain;
 import org.pentaho.metadata.repository.IMetadataDomainRepository;
 import org.pentaho.metadata.util.XmiParser;
@@ -88,7 +84,6 @@ import com.sun.jersey.multipart.FormDataParam;
 public class MetadataResource {
 
   private static final Log logger = LogFactory.getLog( MetadataResource.class );
-  private static final String TEMP_FILE_DIR = PentahoSystem.getApplicationContext().getSolutionPath( "system/tmp" );
   protected static final String OVERWRITE_IN_REPOS = "overwrite";
   private static final String SUCCESS = "3";
   private static final String DATASOURCE_ACL = "acl";
@@ -474,6 +469,7 @@ public class MetadataResource {
    *<li>if there are no locale files:
    *<br/><code>{"xmiFileName":"filename.tmp"}</code></li>
    *</ul>
+   * @throws Exception 
    */
   @POST
   @Path( "/uploadxmi" )
@@ -483,64 +479,12 @@ public class MetadataResource {
     @ResponseCode( code = 403, condition = "Access Control Forbidden" ),
     @ResponseCode( code = 200, condition = "Indicates successful upload" )
   } )
-  public Response uploadMetadataFilesToTempDir( 
+  public MetadataTempFilesListDto uploadMetadataFilesToTempDir( 
       @FormDataParam( "metadataFile" ) InputStream metadataFile,
-      @FormDataParam( "localeFiles" ) List<FormDataBodyPart> localeFiles ) {
+      @FormDataParam( "localeFiles" ) List<FormDataBodyPart> localeFiles ) throws Exception {
         
-        JSONObject json = new JSONObject();
-        StringWriter fileNameWriter = new StringWriter(); 
-        UploadFileUtils utils = new UploadFileUtils( PentahoSessionHolder.getSession() );
-        
-        utils.setShouldUnzip( false );
-        utils.setTemporary( true );
-        utils.setFileName( UUIDUtil.getUUID().toString() );
-        utils.setWriter( fileNameWriter );
-        try {
-          utils.process( metadataFile );
-        } catch ( Exception e ) {
-          return buildServerErrorResponse();
-        }
-        try {
-          json.put( "xmiFileName", fileNameWriter.toString() );
-        } catch ( JSONException e ) {
-          return buildServerErrorResponse();
-        }
-        logger.info( "metadata file uploaded: " + fileNameWriter.toString() );
-        
+      return service.uploadMetadataFilesToTempDir( metadataFile, localeFiles );
 
-        if( localeFiles != null && localeFiles.size() != 0 ) {
-          JSONArray jsonBundleFiles = new JSONArray();
-          for(FormDataBodyPart localeFile : localeFiles ) {
-            InputStream inputStream = new ByteArrayInputStream( localeFile.getValueAs( byte[].class ) );
-            fileNameWriter = new StringWriter(); 
-            utils.setFileName( UUIDUtil.getUUID().toString() );
-            utils.setWriter( fileNameWriter );
-            try {
-              utils.process( inputStream );
-            } catch ( Exception e ) {
-              logger.error( "Uploading error: " + e );
-              return buildServerErrorResponse();
-            }
-            
-            JSONObject jsonBundleObject = new JSONObject();
-            try {
-              jsonBundleObject.put( "originalFileName", localeFile.getFormDataContentDisposition().getFileName() );
-              jsonBundleObject.put( "tempFileName", fileNameWriter.toString() );
-            } catch ( JSONException e ) {
-              return buildServerErrorResponse();
-            }
-            
-            jsonBundleFiles.put( jsonBundleObject );
-          }
-          try {
-            json.put( "bundles", jsonBundleFiles );
-          } catch ( JSONException e ) {
-            return buildServerErrorResponse();
-          }
-          logger.info( "locale file uploaded: " + fileNameWriter.toString() );
-        }
-        
-        return Response.ok( json.toString() ).type( MediaType.APPLICATION_JSON ).build();
   }
   
   /**
@@ -559,10 +503,7 @@ public class MetadataResource {
   public Response isContainsModel( @QueryParam ( "tempFileName" ) String tempFileName ) {  
     boolean res;
     try {
-      XmiParser xmiParser = new XmiParser();
-      byte[] is = IOUtils.toByteArray( new FileInputStream( TEMP_FILE_DIR + File.separatorChar + tempFileName ) );
-      Domain domain = xmiParser.parseXmi( new java.io.ByteArrayInputStream( is ) );
-      res = !DatasourceService.isMetadataDatasource( domain );
+      res = service.isContainsModel( tempFileName );
     } catch ( Exception e ) {
       logger.error( e );
       return buildServerErrorResponse();
@@ -590,43 +531,12 @@ public class MetadataResource {
       @ResponseCode( code = 401, condition = "User is not authorized" )
   } )
   public Response importMetadataFromTemp( @FormParam( "domainId" ) String domainId,
-                                        @FormParam ( "jsonFileList" ) String jsonFileList,
-                                        @FormParam( OVERWRITE_IN_REPOS ) boolean overwrite, 
+                                        @FormParam ( "jsonFileList" ) MetadataTempFilesListDto fileList,
+                                        @FormParam( OVERWRITE_IN_REPOS  ) boolean overwrite, 
                                         @FormParam( DATASOURCE_ACL ) RepositoryFileAclDto acl ) {  
-
+    
     try {  
-      
-      String metadataTempFileName = null;
-      List<String> localeFileNames = new ArrayList<String>();
-      List<InputStream> localeFileStreams = new ArrayList<InputStream>();
-      JSONObject json = new JSONObject( jsonFileList );
-      
-      metadataTempFileName = json.getString( "xmiFileName" );
-      if( metadataTempFileName == null ) {
-        throw new Exception( "Wrong JSON input in parameter tempFileName" );
-      }
-      
-      FileInputStream metaDataFileInputStream = new FileInputStream( TEMP_FILE_DIR + File.separatorChar + metadataTempFileName );
-      
-      JSONArray jsonBundles;
-      try {
-        jsonBundles = json.getJSONArray( "bundles" );
-      } catch( JSONException e ) { 
-        jsonBundles = null;
-      }
-
-      if( jsonBundles != null ) {
-        for( int i = 0; i < jsonBundles.length(); i++ ) {
-          JSONObject jsonBundle = jsonBundles.getJSONObject( i );
-          String originalFileName = jsonBundle.getString( "originalFileName" );
-          String tempFileName = jsonBundle.getString( "tempFileName" );
-          
-          localeFileNames.add( originalFileName );
-          localeFileStreams.add( new FileInputStream( TEMP_FILE_DIR + File.separatorChar + tempFileName ) );
-        }
-      }
-      
-      service.importMetadataDatasource( domainId, metaDataFileInputStream, overwrite, localeFileStreams, localeFileNames, acl );
+      service.importMetadataFromTemp( domainId, fileList, overwrite, acl );;
       return Response.ok( "UDLOADED" ).build();
     } catch ( PentahoAccessControlException e ) {
       return buildServerErrorResponse( e );
