@@ -25,13 +25,8 @@ import static javax.ws.rs.core.Response.Status.CREATED;
 import static javax.ws.rs.core.Response.Status.NOT_FOUND;
 import static javax.ws.rs.core.Response.Status.UNAUTHORIZED;
 
-import java.io.ByteArrayInputStream;
-import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.InputStream;
-import java.io.StringWriter;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -50,15 +45,13 @@ import javax.ws.rs.WebApplicationException;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 
-import org.apache.commons.io.IOUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.codehaus.enunciate.Facet;
 import org.codehaus.enunciate.jaxrs.ResponseCode;
 import org.codehaus.enunciate.jaxrs.StatusCodes;
-import org.pentaho.metadata.model.Domain;
+import org.pentaho.metadata.repository.DomainAlreadyExistsException;
 import org.pentaho.metadata.repository.IMetadataDomainRepository;
-import org.pentaho.metadata.util.XmiParser;
 import org.pentaho.platform.api.engine.PentahoAccessControlException;
 import org.pentaho.platform.dataaccess.datasource.api.DatasourceService;
 import org.pentaho.platform.dataaccess.datasource.api.MetadataService;
@@ -68,10 +61,8 @@ import org.pentaho.platform.engine.core.system.PentahoSystem;
 import org.pentaho.platform.plugin.services.importer.PlatformImportException;
 import org.pentaho.platform.plugin.services.metadata.IPentahoMetadataDomainRepositoryExporter;
 import org.pentaho.platform.repository2.unified.webservices.RepositoryFileAclDto;
-import org.pentaho.platform.util.UUIDUtil;
 import org.pentaho.platform.web.http.api.resources.FileResource;
 import org.pentaho.platform.web.http.api.resources.JaxbList;
-import org.pentaho.platform.web.servlet.UploadFileUtils;
 
 import com.sun.jersey.core.header.FormDataContentDisposition;
 import com.sun.jersey.multipart.FormDataBodyPart;
@@ -517,7 +508,7 @@ public class MetadataResource {
    * from temporary directory
    * Should be called after the /uploadxmi
    * @param domainId
-   * @param jsonFileList
+   * @param fileList
    * @param overwrite
    * @param acl
    * @return
@@ -527,8 +518,13 @@ public class MetadataResource {
   @Consumes( MediaType.APPLICATION_FORM_URLENCODED )
   @Produces( MediaType.TEXT_PLAIN )
   @StatusCodes( {
-      @ResponseCode( code = 200, condition = "File succesfully imported." ),
-      @ResponseCode( code = 401, condition = "User is not authorized" )
+    @ResponseCode( code = 409, condition = "Content already exists (use overwrite flag to force)" ),
+    @ResponseCode( code = 401, condition = "Import failed because publish is prohibited" ),
+    @ResponseCode( code = 500, condition = "Unspecified general error has occurred" ),
+    @ResponseCode( code = 412,
+        condition = "Metadata datasource import failed.  Error code or message included in response entity" ),
+    @ResponseCode( code = 403, condition = "Access Control Forbidden" ),
+    @ResponseCode( code = 201, condition = "Indicates successful import" )
   } )
   public Response importMetadataFromTemp( @FormParam( "domainId" ) String domainId,
                                         @FormParam ( "jsonFileList" ) MetadataTempFilesListDto fileList,
@@ -552,7 +548,12 @@ public class MetadataResource {
           msg = throwable.getMessage();
           logger.error( "Root cause: " + msg );
         }
-        return buildOkResponse( String.valueOf( e.getErrorStatus() ) );
+        int status = e.getErrorStatus();
+        if ( status == 8 ) {
+          throw new ResourceUtil.ContentAlreadyExistsException( msg );
+        } else {
+          throw new ResourceUtil.ImportFailedException( msg );
+        }
       }
     } catch ( Exception e ) {
       logger.error( e );
