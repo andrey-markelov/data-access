@@ -32,7 +32,6 @@ import java.util.Map;
 
 import javax.ws.rs.Consumes;
 import javax.ws.rs.DELETE;
-import javax.ws.rs.DefaultValue;
 import javax.ws.rs.FormParam;
 import javax.ws.rs.GET;
 import javax.ws.rs.POST;
@@ -50,7 +49,6 @@ import org.apache.commons.logging.LogFactory;
 import org.codehaus.enunciate.Facet;
 import org.codehaus.enunciate.jaxrs.ResponseCode;
 import org.codehaus.enunciate.jaxrs.StatusCodes;
-import org.pentaho.metadata.repository.DomainAlreadyExistsException;
 import org.pentaho.metadata.repository.IMetadataDomainRepository;
 import org.pentaho.platform.api.engine.PentahoAccessControlException;
 import org.pentaho.platform.dataaccess.datasource.api.DatasourceService;
@@ -277,7 +275,7 @@ public class MetadataResource {
   public Response importMetadata( @PathParam( "domainId" ) String domainId,
       @FormDataParam( "metadataFile" ) InputStream metadataFile,
       @FormDataParam( "metadataFile" ) FormDataContentDisposition metadataFileInfo,
-      @FormDataParam( OVERWRITE_IN_REPOS ) @DefaultValue( "false" ) Boolean overwrite,
+      @FormDataParam( OVERWRITE_IN_REPOS ) Boolean overwrite,
       @FormDataParam( "localeFiles" ) List<FormDataBodyPart> localeFiles,
       @FormDataParam( "localeFiles" ) List<FormDataContentDisposition> localeFilesInfo,
       @FormDataParam( DATASOURCE_ACL ) RepositoryFileAclDto acl ) {
@@ -528,7 +526,7 @@ public class MetadataResource {
   } )
   public Response importMetadataFromTemp( @FormParam( "domainId" ) String domainId,
                                         @FormParam ( "jsonFileList" ) MetadataTempFilesListDto fileList,
-                                        @FormParam( OVERWRITE_IN_REPOS  ) boolean overwrite, 
+                                        @FormParam( OVERWRITE_IN_REPOS ) boolean overwrite, 
                                         @FormParam( DATASOURCE_ACL ) RepositoryFileAclDto acl ) {  
     
     try {  

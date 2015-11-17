@@ -21,16 +21,11 @@ import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
-import java.io.IOException;
 import java.io.InputStream;
 import java.io.StringWriter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-
-import javax.ws.rs.FormParam;
-import javax.ws.rs.QueryParam;
-import javax.ws.rs.core.Response;
 
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.logging.Log;
@@ -43,6 +38,7 @@ import org.pentaho.platform.api.repository2.unified.IPlatformImportBundle;
 import org.pentaho.platform.api.repository2.unified.RepositoryFileAcl;
 import org.pentaho.platform.dataaccess.datasource.api.resources.MetadataTempFilesListBundleDto;
 import org.pentaho.platform.dataaccess.datasource.api.resources.MetadataTempFilesListDto;
+import org.pentaho.platform.dataaccess.datasource.wizard.service.ConnectionServiceException;
 import org.pentaho.platform.dataaccess.datasource.wizard.service.messages.Messages;
 import org.pentaho.platform.engine.core.system.PentahoSessionHolder;
 import org.pentaho.platform.engine.core.system.PentahoSystem;
@@ -55,11 +51,9 @@ import org.pentaho.platform.repository2.unified.webservices.RepositoryFileAclDto
 import org.pentaho.platform.util.UUIDUtil;
 import org.pentaho.platform.web.http.api.resources.FileResource;
 import org.pentaho.platform.web.servlet.UploadFileUtils;
-import org.pentaho.platform.dataaccess.datasource.wizard.service.ConnectionServiceException;
 
 import com.sun.jersey.core.header.FormDataContentDisposition;
 import com.sun.jersey.multipart.FormDataBodyPart;
-import com.sun.jersey.multipart.FormDataParam;
 
 public class MetadataService extends DatasourceService {
   protected IAclAwarePentahoMetadataDomainRepositoryImporter aclAwarePentahoMetadataDomainRepositoryImporter;
@@ -98,7 +92,7 @@ public class MetadataService extends DatasourceService {
   }
   
   public MetadataTempFilesListDto uploadMetadataFilesToTempDir( InputStream metadataFile, 
-      List<FormDataBodyPart> localeFiles ) throws Exception {
+      List<InputStream> localeFiles, List<String> localeFileNames ) throws Exception {
         
     StringWriter fileNameWriter = new StringWriter(); 
     UploadFileUtils utils = new UploadFileUtils( PentahoSessionHolder.getSession() );
@@ -115,19 +109,20 @@ public class MetadataService extends DatasourceService {
   
     if( localeFiles != null && localeFiles.size() != 0 ) {
       List<MetadataTempFilesListBundleDto> bundles = new ArrayList<MetadataTempFilesListBundleDto>();
-      for(FormDataBodyPart localeFile : localeFiles ) {
-        InputStream inputStream = new ByteArrayInputStream( localeFile.getValueAs( byte[].class ) );
+      int cntr = 0;
+      for(InputStream inputStream : localeFiles ) {
         fileNameWriter = new StringWriter(); 
         utils.setFileName( UUIDUtil.getUUID().toString() );
         utils.setWriter( fileNameWriter );
         utils.process( inputStream );
   
         MetadataTempFilesListBundleDto bundle = new MetadataTempFilesListBundleDto( 
-            localeFile.getFormDataContentDisposition().getFileName(), 
+            localeFileNames.get( cntr ), 
             fileNameWriter.toString() );
         bundles.add( bundle );
         
         logger.info( "locale file uploaded: " + fileNameWriter.toString() );
+        cntr++;
       }
       dto.setBundles( bundles );
     }
@@ -135,6 +130,26 @@ public class MetadataService extends DatasourceService {
     return dto;
   }
 
+  public MetadataTempFilesListDto uploadMetadataFilesToTempDir( InputStream metadataFile, 
+      List<FormDataBodyPart> localeFiles ) throws Exception {
+        
+  
+    List<InputStream> bundles = null;
+    List<String> fileNames = null;
+    
+    if( localeFiles != null && localeFiles.size() != 0 ) {
+      bundles = new ArrayList<InputStream>();
+      fileNames = new ArrayList<String>();
+      for(FormDataBodyPart localeFile : localeFiles ) {
+        InputStream inputStream = new ByteArrayInputStream( localeFile.getValueAs( byte[].class ) );
+        bundles.add( inputStream );
+        fileNames.add( localeFile.getFormDataContentDisposition().getFileName() );
+      }
+    }
+    
+    return uploadMetadataFilesToTempDir( metadataFile, bundles, fileNames );
+  }
+  
   public void importMetadataDatasource( String domainId, InputStream metadataFile,
                                         FormDataContentDisposition metadataFileInfo, boolean overwrite,
                                         List<FormDataBodyPart> localeFiles,
