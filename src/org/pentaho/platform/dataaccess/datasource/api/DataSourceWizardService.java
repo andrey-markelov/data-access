@@ -27,10 +27,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-import javax.ws.rs.DefaultValue;
-import javax.ws.rs.FormParam;
-import javax.ws.rs.core.Response;
-
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
@@ -55,6 +51,7 @@ import org.pentaho.platform.dataaccess.datasource.api.resources.MetadataTempFile
 import org.pentaho.platform.dataaccess.datasource.api.resources.MetadataTempFilesListDto;
 import org.pentaho.platform.dataaccess.datasource.beans.LogicalModelSummary;
 import org.pentaho.platform.dataaccess.datasource.utils.DataAccessPermissionUtil;
+import org.pentaho.platform.dataaccess.datasource.wizard.service.ConnectionServiceException;
 import org.pentaho.platform.dataaccess.datasource.wizard.service.DatasourceServiceException;
 import org.pentaho.platform.dataaccess.datasource.wizard.service.gwt.IDSWDatasourceService;
 import org.pentaho.platform.dataaccess.datasource.wizard.service.impl.DSWDatasourceServiceImpl;
@@ -71,7 +68,6 @@ import org.pentaho.platform.plugin.services.importexport.legacy.MondrianCatalogR
 import org.pentaho.platform.plugin.services.metadata.IAclAwarePentahoMetadataDomainRepositoryImporter;
 import org.pentaho.platform.plugin.services.metadata.IPentahoMetadataDomainRepositoryExporter;
 import org.pentaho.platform.repository2.unified.webservices.RepositoryFileAclDto;
-import org.pentaho.platform.dataaccess.datasource.wizard.service.ConnectionServiceException;
 
 public class DataSourceWizardService extends DatasourceService {
 
@@ -270,16 +266,16 @@ public class DataSourceWizardService extends DatasourceService {
       RepositoryFileAclDto acl ) throws PentahoAccessControlException, IllegalArgumentException, DswPublishValidationException, Exception {  
     
     String metadataTempFileName = fileList.getXmiFileName();
-    FileInputStream metaDataFileInputStream = new FileInputStream( MetadataService.TEMP_FILE_DIR + File.separatorChar + metadataTempFileName );
+    InputStream metaDataFileInputStream = createInputStreamFromFile( MetadataService.getUploadDir() + File.separatorChar + metadataTempFileName );
     List<MetadataTempFilesListBundleDto> locBundles = fileList.getBundles();
     List<String> localeFileNames = new ArrayList<String>();
     List<InputStream> localeFileStreams = new ArrayList<InputStream>();
     
     if( locBundles != null ) {
-    for( MetadataTempFilesListBundleDto bundle : locBundles ) {
-    localeFileNames.add( bundle.getOriginalFileName() );
-    localeFileStreams.add( new FileInputStream( MetadataService.TEMP_FILE_DIR + File.separatorChar + bundle.getTempFileName() ) );
-    }
+      for( MetadataTempFilesListBundleDto bundle : locBundles ) {
+        localeFileNames.add( bundle.getOriginalFileName() );
+        localeFileStreams.add( new FileInputStream( MetadataService.getUploadDir() + File.separatorChar + bundle.getTempFileName() ) );
+      }
     }
     
     return publishDsw( domainId + DataSourceWizardService.METADATA_EXT, metaDataFileInputStream, 
@@ -488,6 +484,10 @@ public class DataSourceWizardService extends DatasourceService {
 
   protected IPlatformImporter getIPlatformImporter() {
     return PentahoSystem.get( IPlatformImporter.class );
+  }
+  
+  protected InputStream createInputStreamFromFile( String fileName) throws FileNotFoundException {
+    return new FileInputStream( fileName );
   }
 
 }

@@ -20,6 +20,7 @@ package org.pentaho.platform.dataaccess.datasource.ui.importing;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 
+import org.apache.commons.httpclient.HttpStatus;
 import org.pentaho.gwt.widgets.client.utils.NameUtils;
 import org.pentaho.gwt.widgets.client.utils.i18n.ResourceBundle;
 import org.pentaho.platform.dataaccess.datasource.wizard.DatasourceMessages;
@@ -87,6 +88,7 @@ public class MetadataImportDialogController extends AbstractXulDialogController<
   private XulVbox hiddenArea;
   private DatasourceMessages messages = null;
   private boolean overwrite;
+  private boolean allowToHide = true;
   private static FormPanel.SubmitCompleteHandler submitHandler = null;
 
   // GWT controls
@@ -193,7 +195,7 @@ public class MetadataImportDialogController extends AbstractXulDialogController<
         checkFileRequest.setCallback( new RequestCallback() {
           @Override
           public void onResponseReceived( Request request, Response response ) {
-            if( response.getStatusCode() == 200 ) {
+            if( response.getStatusCode() == HttpStatus.SC_OK ) {
               if( Boolean.TRUE.toString().equalsIgnoreCase( response.getText() ) ) {
                 confirm( resBundle.getString( "importDialog.IMPORT_METADATA" ), 
                     resBundle.getString( "importDialog.CONFIRMATION_LOAD_DSW" ), 
@@ -264,10 +266,10 @@ public class MetadataImportDialogController extends AbstractXulDialogController<
     
     @Override
     public void onResponseReceived( Request request, Response response ) {
-      if( response.getStatusCode() == 200 ) { 
+      if( response.getStatusCode() == HttpStatus.SC_OK ) { 
         //done
         onImportSuccess();
-      } else if ( response.getStatusCode() == 409 ) {
+      } else if ( response.getStatusCode() == HttpStatus.SC_CONFLICT ) {
         //exists
         confirm( resBundle.getString( "importDialog.IMPORT_METADATA" ), 
             resBundle.getString( "Metadata.OVERWRITE_EXISTING_SCHEMA" ), 
@@ -279,6 +281,9 @@ public class MetadataImportDialogController extends AbstractXulDialogController<
                 //one more attempt with overwrite=true
                 if( result ) {
                   doImport( true );
+                } else {
+                  allowToHide = true;
+                  hideDialog();
                 }
               }
               
@@ -377,13 +382,13 @@ public class MetadataImportDialogController extends AbstractXulDialogController<
   
   private void onImportSuccess() {
     showMessagebox( resBundle.getString( "importDialog.IMPORT_METADATA" ), resBundle.getString( "importDialog.SUCCESS_METADATA_IMPORT" ) );
-    hideDialog();
+    super.hideDialog();
   }  
   
   private void onImportError( String message ) {
     showMessagebox( resBundle.getString( "importDialog.IMPORT_METADATA" ), 
         resBundle.getString( "importDialog.ERROR_IMPORTING_METADATA" ) + ": " + message );
-    hideDialog();
+    super.hideDialog();
   }
 
   public void showDialog() {
@@ -475,7 +480,7 @@ public class MetadataImportDialogController extends AbstractXulDialogController<
   }
 
   /**
-   * Shows a informational dialog
+   * Shows an informational dialog
    *
    * @param title   title of dialog
    * @param message message within dialog
@@ -540,6 +545,20 @@ public class MetadataImportDialogController extends AbstractXulDialogController<
   public void setOverwrite( boolean overwrite ) {
     this.overwrite = overwrite;
 
+  }
+  
+  @Override
+  public void onDialogAccept() {
+    importDialog.setDisabled( true );
+    allowToHide = false;
+    super.onDialogAccept();
+  }
+  
+  @Override
+  public void hideDialog() {
+    if ( allowToHide ) {
+      super.hideDialog();
+    }
   }
 
 }

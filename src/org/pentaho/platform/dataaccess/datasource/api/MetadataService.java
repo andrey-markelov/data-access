@@ -32,6 +32,7 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.pentaho.metadata.model.Domain;
 import org.pentaho.metadata.util.XmiParser;
+import org.pentaho.platform.api.engine.IApplicationContext;
 import org.pentaho.platform.api.engine.IPentahoSession;
 import org.pentaho.platform.api.engine.PentahoAccessControlException;
 import org.pentaho.platform.api.repository2.unified.IPlatformImportBundle;
@@ -59,8 +60,24 @@ public class MetadataService extends DatasourceService {
   protected IAclAwarePentahoMetadataDomainRepositoryImporter aclAwarePentahoMetadataDomainRepositoryImporter;
 
   private static final Log logger = LogFactory.getLog( MetadataService.class );
-  public static final String TEMP_FILE_DIR = PentahoSystem.getApplicationContext().getSolutionPath( "system/tmp" );
+  private static String upload_dir;
 
+  public static String getUploadDir() {
+    if( upload_dir == null ) {
+      IApplicationContext context = PentahoSystem.getApplicationContext();
+      if( context != null ) {
+        upload_dir = PentahoSystem.getApplicationContext().getSolutionPath( "system/tmp" );
+      } else {
+        return "";
+      }
+    }
+    return upload_dir;
+  }
+  
+  protected String internalGetUploadDir() {
+    return MetadataService.getUploadDir();
+  }
+  
   public MetadataService() {
     if ( metadataDomainRepository instanceof IAclAwarePentahoMetadataDomainRepositoryImporter ) {
       aclAwarePentahoMetadataDomainRepositoryImporter = (IAclAwarePentahoMetadataDomainRepositoryImporter) metadataDomainRepository;
@@ -92,8 +109,35 @@ public class MetadataService extends DatasourceService {
   }
   
   public MetadataTempFilesListDto uploadMetadataFilesToTempDir( InputStream metadataFile, 
-      List<InputStream> localeFiles, List<String> localeFileNames ) throws Exception {
+      List<InputStream> localeFileStreams, List<String> localeFileNames ) throws Exception {
         
+    String fileName = uploadFile( metadataFile );
+    MetadataTempFilesListDto dto = new MetadataTempFilesListDto();
+    
+    dto.setXmiFileName( fileName );
+    logger.info( "metadata file uploaded: " + fileName );
+  
+    if( localeFileStreams != null && localeFileStreams.size() != 0 ) {
+      List<MetadataTempFilesListBundleDto> bundles = new ArrayList<MetadataTempFilesListBundleDto>();
+      int cntr = 0;
+      for(InputStream inputStream : localeFileStreams ) {
+        fileName = uploadFile( inputStream );
+  
+        MetadataTempFilesListBundleDto bundle = new MetadataTempFilesListBundleDto( 
+            localeFileNames.get( cntr ), 
+            fileName );
+        bundles.add( bundle );
+        
+        logger.info( "locale file uploaded: " + fileName );
+        cntr++;
+      }
+      dto.setBundles( bundles );
+    }
+    
+    return dto;
+  }
+  
+  protected String uploadFile( InputStream is ) throws Exception {
     StringWriter fileNameWriter = new StringWriter(); 
     UploadFileUtils utils = new UploadFileUtils( PentahoSessionHolder.getSession() );
     
@@ -101,33 +145,9 @@ public class MetadataService extends DatasourceService {
     utils.setTemporary( true );
     utils.setFileName( UUIDUtil.getUUID().toString() );
     utils.setWriter( fileNameWriter );
-    utils.process( metadataFile );
-  
-    MetadataTempFilesListDto dto = new MetadataTempFilesListDto();
-    dto.setXmiFileName( fileNameWriter.toString() );
-    logger.info( "metadata file uploaded: " + fileNameWriter.toString() );
-  
-    if( localeFiles != null && localeFiles.size() != 0 ) {
-      List<MetadataTempFilesListBundleDto> bundles = new ArrayList<MetadataTempFilesListBundleDto>();
-      int cntr = 0;
-      for(InputStream inputStream : localeFiles ) {
-        fileNameWriter = new StringWriter(); 
-        utils.setFileName( UUIDUtil.getUUID().toString() );
-        utils.setWriter( fileNameWriter );
-        utils.process( inputStream );
-  
-        MetadataTempFilesListBundleDto bundle = new MetadataTempFilesListBundleDto( 
-            localeFileNames.get( cntr ), 
-            fileNameWriter.toString() );
-        bundles.add( bundle );
-        
-        logger.info( "locale file uploaded: " + fileNameWriter.toString() );
-        cntr++;
-      }
-      dto.setBundles( bundles );
-    }
+    utils.process( is );
+    return fileNameWriter.toString();
     
-    return dto;
   }
 
   public MetadataTempFilesListDto uploadMetadataFilesToTempDir( InputStream metadataFile, 
@@ -209,8 +229,12 @@ public class MetadataService extends DatasourceService {
   
   public boolean isContainsModel( String tempFileName ) throws Exception {  
     XmiParser xmiParser = new XmiParser();
-    byte[] is = IOUtils.toByteArray( new FileInputStream( TEMP_FILE_DIR + File.separatorChar + tempFileName ) );
+    byte[] is = IOUtils.toByteArray( createInputStreamFromFile( internalGetUploadDir() + File.separatorChar + tempFileName ) );
     Domain domain = xmiParser.parseXmi( new java.io.ByteArrayInputStream( is ) );
+    return isContainsModel( domain );
+  }
+  
+  protected  boolean isContainsModel( Domain domain ) throws Exception {
     return !DatasourceService.isMetadataDatasource( domain );
   }
   
@@ -218,7 +242,7 @@ public class MetadataService extends DatasourceService {
       boolean overwrite, RepositoryFileAclDto acl ) throws PentahoAccessControlException, PlatformImportException, Exception {  
 
     String metadataTempFileName = fileList.getXmiFileName();
-    FileInputStream metaDataFileInputStream = new FileInputStream( TEMP_FILE_DIR + File.separatorChar + metadataTempFileName );
+    InputStream metaDataFileInputStream = createInputStreamFromFile( internalGetUploadDir() + File.separatorChar + metadataTempFileName );
     List<MetadataTempFilesListBundleDto> locBundles = fileList.getBundles();
     List<String> localeFileNames = new ArrayList<String>();
     List<InputStream> localeFileStreams = new ArrayList<InputStream>();
@@ -226,7 +250,7 @@ public class MetadataService extends DatasourceService {
     if( locBundles != null ) {
       for( MetadataTempFilesListBundleDto bundle : locBundles ) {
         localeFileNames.add( bundle.getOriginalFileName() );
-        localeFileStreams.add( new FileInputStream( TEMP_FILE_DIR + File.separatorChar + bundle.getTempFileName() ) );
+        localeFileStreams.add( createInputStreamFromFile( internalGetUploadDir() + File.separatorChar + bundle.getTempFileName() ) );
       }
     }
     
@@ -322,6 +346,11 @@ public class MetadataService extends DatasourceService {
     return builder;
   }
 
+  
+  protected InputStream createInputStreamFromFile( String fileName) throws FileNotFoundException {
+    return new FileInputStream( fileName );
+  }
+  
   public static RepositoryFileImportBundle createNewRepositoryFileImportBundle( InputStream bais, String fileName, String domainId ) {
     return new RepositoryFileImportBundle.Builder().input( bais ).charSet( "UTF-8" ).hidden( false )
       .name( fileName ).withParam( "domain-id", domainId )
@@ -329,6 +358,10 @@ public class MetadataService extends DatasourceService {
   }
 
   protected ByteArrayInputStream createNewByteArrayInputStream( byte[] buf ) {
-    return new ByteArrayInputStream( buf );
+    if ( buf != null ) {
+      return new ByteArrayInputStream( buf );
+    } else {
+      return null;
+    }
   }
 }
